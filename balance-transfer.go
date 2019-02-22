@@ -1,11 +1,11 @@
 // ====CHAINCODE EXECUTION SAMPLES (CLI) ==================
 
-// #docker cp assignment.go cli:/opt/gopath/src/github.com/hyperledger/fabric/peer
+// #docker cp balance-transfer.go cli:/opt/gopath/src/github.com/hyperledger/fabric/peer
 // #docker exec -it cli bash
 
 // ====CHAINCODE EXECUTION SAMPLES (CLI) ==================
 // mkdir -p /opt/gopath/src/github.com/hyperledger/fabric/examples/chaincode/go/accounts
-// cp ./assignment.go /opt/gopath/src/github.com/hyperledger/fabric/examples/chaincode/go/accounts/
+// cp ./balance-transfer.go /opt/gopath/src/github.com/hyperledger/fabric/examples/chaincode/go/accounts/
 
 // export CHANNEL_NAME=mychannel
 // export ORDERER_CA=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem
@@ -37,8 +37,8 @@
 // peer chaincode query -C $CHANNEL_NAME -n accounts -c '{"Args":["getaccount","dale"]}'
 
 // ==== Transfer amount ====
-// peer chaincode invoke -o orderer.example.com:7050  --tls --cafile $ORDERER_CA -C $CHANNEL_NAME -n accounts -c '{"Args":["transfer","alice","bob", "50"]}'
-// peer chaincode invoke -o orderer.example.com:7050  --tls --cafile $ORDERER_CA -C $CHANNEL_NAME -n accounts -c '{"Args":["transfer","dave","charlie", "50"]}'
+// peer chaincode invoke -o orderer.example.com:7050  --tls --cafile $ORDERER_CA -C $CHANNEL_NAME -n accounts -c '{"Args":["transfer","alice","bob", "201"]}'
+// peer chaincode invoke -o orderer.example.com:7050  --tls --cafile $ORDERER_CA -C $CHANNEL_NAME -n accounts -c '{"Args":["transfer","dave","charlie", "201"]}'
 
 // ==== Query accounts After transfer ====
 // peer chaincode query -C $CHANNEL_NAME -n accounts -c '{"Args":["getaccount","alice"]}'
@@ -47,7 +47,7 @@
 // peer chaincode query -C $CHANNEL_NAME -n accounts -c '{"Args":["getaccount","dave"]}'
 
 // Rich Query (Only supported if CouchDB is used as state database):
-// peer chaincode query -C mychannel -n accounts -c '{"Args":["query","{\"selector\":{\"balance\": { \"$lt\":200}}}"]}'
+// peer chaincode query -C mychannel -n accounts -c '{"Args":["query","{\"selector\":{\"overdraft\": true }}"]}'
 
 package main
 
@@ -67,16 +67,17 @@ type AccountChaincode struct {
 }
 
 type account struct {
-	ObjectType string `json:"docType"`
-	AccountID  string `json:"accountid"`
-	Name       string `json:"name"`
-	Balanace   int    `json:"balance"`
+	ObjectType string  `json:"docType"`
+	AccountID  string  `json:"accountid"`
+	Name       string  `json:"name"`
+	Balanace   float64 `json:"balance"`
+	Overdraft  bool    `json:"overdraft"`
 }
 
 // Init initializes chaincode
 // ===========================
 func (t *AccountChaincode) Init(stub shim.ChaincodeStubInterface) pb.Response {
-	fmt.Println("====== Instantiating AccountChaincode ")
+	fmt.Println("====== Instantiating AccountChaincode ======")
 	return shim.Success(nil)
 }
 
@@ -142,7 +143,7 @@ func (t *AccountChaincode) createAccount(stub shim.ChaincodeStubInterface, args 
 
 	// ==== Create account object and marshal to JSON ====
 	objectType := "account"
-	account := &account{objectType, accountID, name, balance}
+	account := &account{objectType, accountID, name, float64(balance), false}
 	accountJSONasBytes, err := json.Marshal(account)
 	if err != nil {
 		return shim.Error(err.Error())
@@ -195,9 +196,9 @@ func (t *AccountChaincode) transfer(stub shim.ChaincodeStubInterface, args []str
 
 	accountName := args[0]
 	transfereeName := strings.ToLower(args[1])
-	balance, err := strconv.Atoi(args[2])
+	balance, err := strconv.ParseFloat(args[2], 64)
 	if err != nil {
-		return shim.Error("3rd argument must be a numeric string")
+		return shim.Error("3rd argument must be a float, ex: 100.10")
 	}
 	fmt.Println("- start transfer balance ", accountName, transfereeName)
 
@@ -214,6 +215,9 @@ func (t *AccountChaincode) transfer(stub shim.ChaincodeStubInterface, args []str
 	}
 	//Deduct the amount from original account
 	originalAcc.Balanace = originalAcc.Balanace - balance
+	if originalAcc.Balanace < 0 {
+		originalAcc.Overdraft = true
+	}
 
 	// update the original account
 	accountJSONasBytes, _ := json.Marshal(originalAcc)
